@@ -94,7 +94,7 @@ namespace NativeAnalyzer
             Console.WriteLine("Performing speed test...");
             var speedTest = await StartSpeedTest(Path.Combine(outputFolder, "speedtest_results.txt"));
 
-            var targets = new[] { "RDGCHG.myrealdata.net", "RDGHTN.myrealdata.net", "RDGNV.myrealdata.net", "RDGATL.myrealdata.net" };
+            var targets = new[] { "RDGCHG.myrealdata.net", "RDGHTN.myrealdata.net", "RDGNV.myrealdata.net", "RDGATL.myrealdata.net", "RDGDEN.myrealdata.net" };
             var tcpingResults = new List<TcpingResult>();
 
             foreach (var target in targets)
