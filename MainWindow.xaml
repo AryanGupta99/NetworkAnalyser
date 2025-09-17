@@ -1,0 +1,134 @@
+﻿<Window x:Class="Ace_NDT_v2.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:Ace_NDT_v2"
+        mc:Ignorable="d"
+    Title="Ace NDT - Network Analysis Tool" Height="300" Width="750"
+        WindowStartupLocation="CenterScreen"
+        AllowsTransparency="True"
+        Background="Transparent"
+        WindowStyle="None"
+        BorderThickness="0"
+        BorderBrush="#00FFFFFF">
+
+    <Window.Resources>
+        <Style x:Key="ModernButton" TargetType="Button">
+            <Setter Property="Background" Value="#3498db"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="15,8"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Width" Value="140"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Margin" Value="10"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" 
+                                CornerRadius="5"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" 
+                                             VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#2980b9"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#1f6aa5"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Background" Value="#cccccc"/>
+                                <Setter Property="Foreground" Value="#999999"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border CornerRadius="10" BorderThickness="5" BorderBrush="#CCCCCC" Background="#FFFFFF">
+        <Grid x:Name="MainGrid" RenderTransformOrigin="0.502,0.451">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="30"/>
+            </Grid.RowDefinitions>
+
+            <!-- Custom Title Bar (with X button removed) -->
+            <Border Grid.Row="0" Background="#2c3e50" CornerRadius="10,10,0,0">
+                <Grid>
+                    <TextBlock Text="Ace Cloud Hosting Network Analyser" 
+                               Foreground="White" 
+                               FontSize="16" 
+                               Margin="15,0,0,0" 
+                               VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Grid>
+            </Border>
+
+            <!-- Logo/Icon -->
+            <Image Grid.Row="1" 
+                   Source="/Images/analysis-icon.png" 
+                   Width="100" 
+                   Margin="198,4,198,0"/>
+
+            <!-- Progress Bar -->
+            <ProgressBar x:Name="ProgressBar" 
+                         Grid.Row="2" 
+                         Height="20" 
+                         Margin="30,10,30,10" 
+                         IsIndeterminate="False"/>
+
+            <!-- Status Text -->
+            <TextBlock x:Name="StatusText" 
+                       Grid.Row="3" 
+                       Text="Ready to start analysis" 
+                       HorizontalAlignment="Center" 
+                       Margin="0,5,0,15" 
+                       FontSize="14"/>
+
+            <!-- Buttons (keeping original Start/Stop buttons and adding Close button) -->
+            <StackPanel Grid.Row="4" 
+                        Orientation="Horizontal" 
+                        HorizontalAlignment="Center">
+                <Button x:Name="StartButton" 
+                        Content="Start Analysis" 
+                        Style="{StaticResource ModernButton}" 
+                        Click="StartAnalysis_Click"/>
+                <Button x:Name="StopButton" 
+                        Content="Stop Analysis" 
+                        IsEnabled="False" 
+                        Background="#e74c3c" 
+                        Style="{StaticResource ModernButton}" 
+                        Click="StopAnalysis_Click" Foreground="White"/>
+                <Button x:Name="ViewResultButton" 
+                        Content="View Result" 
+                        Background="#2ecc71"
+                        Style="{StaticResource ModernButton}" 
+                        IsEnabled="False"
+                        Click="ViewResult_Click" Foreground="White"/>
+                <Button x:Name="CloseButton" 
+                        Content="Close" 
+                        Background="#7f8c8d" 
+                        Style="{StaticResource ModernButton}" 
+                        Click="Close_Click"/>
+            </StackPanel>
+
+            <!-- Status Bar -->
+            <Border Grid.Row="5" 
+                    Background="#ecf0f1">
+                <TextBlock Text="© Ace Cloud Hosting" 
+                           Foreground="#7f8c8d" 
+                           HorizontalAlignment="Center" 
+                           VerticalAlignment="Center" 
+                           FontSize="11"/>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

@@ -1,0 +1,102 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>Ace_NDT_v2</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+  <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <UseWPF>true</UseWPF>
+    
+    <ApplicationIcon>favicon-96x96.ico</ApplicationIcon>
+    <Title>Ace Cloud Hosting Network Analyzer</Title>
+    <Authors>ACH Development Team</Authors>
+    <Company>Ace Cloud Hosting</Company>
+    <Product>Ace Cloud Hosting Network Analyzer</Product>
+    <Copyright>Ace Cloud Hosting</Copyright>
+    <PackageIcon>favicon-96x96.png</PackageIcon>
+    <AssemblyVersion>1.1.0.1</AssemblyVersion>
+    <FileVersion>1.1.0.1</FileVersion>
+  </PropertyGroup>
+
+  <!-- Publish settings: single-file self-contained executable for Windows x64 -->
+  <PropertyGroup>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishTrimmed>false</PublishTrimmed>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- Prevent trimming native/WinForms assets accidentally -->
+    <TrimMode>copyused</TrimMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="anw.ps1" />
+    <None Remove="speedtest.exe" />
+    <None Remove="tcping.exe" />
+    <None Remove="WinMTR.exe" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="favicon-96x96.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="anw.ps1">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="speedtest.exe" />
+    <EmbeddedResource Include="tcping.exe">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="WinMTR.exe">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!-- Ensure helper native files are copied to publish folder for runtime use -->
+  <ItemGroup>
+    <Content Include="anw.ps1">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+    <Content Include="speedtest.exe">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+    <Content Include="tcping.exe">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+    <Content Include="WinMTR.exe">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+    <!-- NativeAnalyzer project is referenced; its outputs will be published via the ProjectReference -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\..\Users\sumeet.sachdeva\Downloads\favicon-96x96.png">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Images\analysis-icon.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="NativeAnalyzer\NativeAnalyzer.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Prevent SDK-style wildcard compile from including NativeAnalyzer source files
+         The NativeAnalyzer project is referenced as a ProjectReference and will
+         be built separately, so exclude its .cs files from the WPF project. -->
+    <Compile Remove="NativeAnalyzer\**\*.cs" />
+    <None Remove="NativeAnalyzer\**\*.*" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,37 @@
+
+Probing 207.60.96.69:443/tcp - Port is open - time=52.290ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.232ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.250ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.600ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=52.165ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.441ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.559ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.281ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.861ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.565ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.274ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.600ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.089ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.498ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=55.666ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.575ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.382ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.346ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.334ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.206ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=52.075ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=52.964ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.765ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=52.433ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.768ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=52.032ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.419ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.928ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.550ms 
+Probing 207.60.96.69:443/tcp - Port is open - time=51.528ms 
+
+Ping statistics for 207.60.96.69:443
+     30 probes sent. 
+     30 successful, 0 failed.  (0.00% fail)
+Approximate trip times in milli-seconds:
+     Minimum = 51.089ms, Maximum = 55.666ms, Average = 51.789ms

@@ -1,0 +1,37 @@
+
+Probing 107.191.176.69:443/tcp - Port is open - time=0.828ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.547ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.726ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=1.952ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.534ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.756ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.604ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.606ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=1.135ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.602ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.570ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.535ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.706ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.588ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=1.070ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.583ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.573ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.630ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.631ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.680ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.545ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.759ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.684ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.620ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.514ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.693ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.605ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.755ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.734ms 
+Probing 107.191.176.69:443/tcp - Port is open - time=0.766ms 
+
+Ping statistics for 107.191.176.69:443
+     30 probes sent. 
+     30 successful, 0 failed.  (0.00% fail)
+Approximate trip times in milli-seconds:
+     Minimum = 0.514ms, Maximum = 1.952ms, Average = 0.718ms
