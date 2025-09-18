@@ -448,7 +448,8 @@ namespace NativeAnalyzer
                 if (p == null) return null;
                 var output = await p.StandardOutput.ReadToEndAsync();
                 p.WaitForExit();
-                File.WriteAllText(outputFile, output);
+
+                // Previously we saved raw JSON; now we only produce the human-readable text report.
 
                 try
                 {
@@ -456,14 +457,46 @@ namespace NativeAnalyzer
                     var root = json.RootElement;
 
                     double downloadBandwidth = 0, uploadBandwidth = 0, ping = 0, jitter = 0, packetLoss = 0;
+                    string isp = "";
+                    string internalIp = "";
+                    string externalIp = "";
+                    string interfaceName = "";
+                    string macAddr = "";
+                    bool isVpn = false;
+                    string serverHost = "";
+                    string serverName = "";
+                    string serverLocation = "";
+                    string serverCountry = "";
+                    string serverIp = "";
+                    int serverPort = 0;
+                    string serverId = "";
+                    string resultUrl = "";
+
+                    // latency details
+                    double dl_iqm = 0, dl_low = 0, dl_high = 0, dl_jitter = 0;
+                    double ul_iqm = 0, ul_low = 0, ul_high = 0, ul_jitter = 0;
 
                     if (root.TryGetProperty("download", out var dl) && dl.ValueKind == JsonValueKind.Object)
                     {
                         if (dl.TryGetProperty("bandwidth", out var bw) && bw.TryGetDouble(out var bwd)) downloadBandwidth = bwd;
+                        if (dl.TryGetProperty("latency", out var dlat) && dlat.ValueKind == JsonValueKind.Object)
+                        {
+                            if (dlat.TryGetProperty("iqm", out var iq) && iq.TryGetDouble(out var iqv)) dl_iqm = iqv;
+                            if (dlat.TryGetProperty("low", out var low) && low.TryGetDouble(out var lowv)) dl_low = lowv;
+                            if (dlat.TryGetProperty("high", out var high) && high.TryGetDouble(out var highv)) dl_high = highv;
+                            if (dlat.TryGetProperty("jitter", out var dj) && dj.TryGetDouble(out var djv)) dl_jitter = djv;
+                        }
                     }
                     if (root.TryGetProperty("upload", out var ul) && ul.ValueKind == JsonValueKind.Object)
                     {
                         if (ul.TryGetProperty("bandwidth", out var bw) && bw.TryGetDouble(out var bwu)) uploadBandwidth = bwu;
+                        if (ul.TryGetProperty("latency", out var ulat) && ulat.ValueKind == JsonValueKind.Object)
+                        {
+                            if (ulat.TryGetProperty("iqm", out var iq) && iq.TryGetDouble(out var iqv)) ul_iqm = iqv;
+                            if (ulat.TryGetProperty("low", out var low) && low.TryGetDouble(out var lowv)) ul_low = lowv;
+                            if (ulat.TryGetProperty("high", out var high) && high.TryGetDouble(out var highv)) ul_high = highv;
+                            if (ulat.TryGetProperty("jitter", out var uj) && uj.TryGetDouble(out var ujv)) ul_jitter = ujv;
+                        }
                     }
                     if (root.TryGetProperty("ping", out var pingEl) && pingEl.ValueKind == JsonValueKind.Object)
                     {
@@ -471,14 +504,89 @@ namespace NativeAnalyzer
                         if (pingEl.TryGetProperty("jitter", out var pj) && pj.TryGetDouble(out var jd)) jitter = jd;
                     }
                     if (root.TryGetProperty("packetLoss", out var ploss) && ploss.TryGetDouble(out var pld)) packetLoss = pld;
+                    if (root.TryGetProperty("isp", out var ispEl) && ispEl.ValueKind == JsonValueKind.String) isp = ispEl.GetString() ?? "";
+                    if (root.TryGetProperty("interface", out var ifEl) && ifEl.ValueKind == JsonValueKind.Object)
+                    {
+                        if (ifEl.TryGetProperty("internalIp", out var iip) && iip.ValueKind == JsonValueKind.String) internalIp = iip.GetString() ?? "";
+                        if (ifEl.TryGetProperty("externalIp", out var eip) && eip.ValueKind == JsonValueKind.String) externalIp = eip.GetString() ?? "";
+                        if (ifEl.TryGetProperty("name", out var iname) && iname.ValueKind == JsonValueKind.String) interfaceName = iname.GetString() ?? "";
+                        if (ifEl.TryGetProperty("macAddr", out var mac) && mac.ValueKind == JsonValueKind.String) macAddr = mac.GetString() ?? "";
+                        if (ifEl.TryGetProperty("isVpn", out var vpn) && vpn.ValueKind == JsonValueKind.True) isVpn = true;
+                    }
+                    if (root.TryGetProperty("server", out var srv) && srv.ValueKind == JsonValueKind.Object)
+                    {
+                        if (srv.TryGetProperty("host", out var sh) && sh.ValueKind == JsonValueKind.String) serverHost = sh.GetString() ?? "";
+                        if (srv.TryGetProperty("name", out var sn) && sn.ValueKind == JsonValueKind.String) serverName = sn.GetString() ?? "";
+                        if (srv.TryGetProperty("location", out var sl) && sl.ValueKind == JsonValueKind.String) serverLocation = sl.GetString() ?? "";
+                        if (srv.TryGetProperty("country", out var sc) && sc.ValueKind == JsonValueKind.String) serverCountry = sc.GetString() ?? "";
+                        if (srv.TryGetProperty("ip", out var sip) && sip.ValueKind == JsonValueKind.String) serverIp = sip.GetString() ?? "";
+                        if (srv.TryGetProperty("port", out var sport) && sport.TryGetInt32(out var sp)) serverPort = sp;
+                        if (srv.TryGetProperty("id", out var sid) && sid.ValueKind == JsonValueKind.Number) serverId = sid.ToString();
+                    }
+                    if (root.TryGetProperty("result", out var res) && res.ValueKind == JsonValueKind.Object)
+                    {
+                        if (res.TryGetProperty("url", out var ru) && ru.ValueKind == JsonValueKind.String) resultUrl = ru.GetString() ?? "";
+                        // intentionally not saving result id into the text report per request
+                    }
 
                     var download = downloadBandwidth * 8 / 1000000.0;
                     var upload = uploadBandwidth * 8 / 1000000.0;
 
-                    return new SpeedTestResult { Download = Math.Round(download, 2), Upload = Math.Round(upload, 2), Ping = ping, Jitter = jitter, PacketLoss = packetLoss };
+                    // Build human-readable report
+                    var sb = new StringBuilder();
+                    sb.AppendLine("*****************************************************************************");
+                    sb.AppendLine("* SPEEDTEST RESULTS *");
+                    sb.AppendLine("*****************************************************************************\n");
+                    sb.AppendLine($"TEST TIME: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    sb.AppendLine();
+                    sb.AppendLine("SERVER INFORMATION");
+                    sb.AppendLine("------------------");
+                    if (!string.IsNullOrEmpty(serverName)) sb.AppendLine($"Name: {serverName}");
+                    if (!string.IsNullOrEmpty(serverHost)) sb.AppendLine($"Host: {serverHost}");
+                    if (!string.IsNullOrEmpty(serverIp)) sb.AppendLine($"Server IP: {serverIp}");
+                    if (serverPort != 0) sb.AppendLine($"Server Port: {serverPort}");
+                    if (!string.IsNullOrEmpty(serverId)) sb.AppendLine($"Server ID: {serverId}");
+                    if (!string.IsNullOrEmpty(serverLocation) || !string.IsNullOrEmpty(serverCountry)) sb.AppendLine($"Location: {serverLocation}{(string.IsNullOrEmpty(serverLocation) ? "" : ", ")}{serverCountry}");
+                    sb.AppendLine();
+                    sb.AppendLine("CONNECTION INFORMATION");
+                    sb.AppendLine("----------------------");
+                    if (!string.IsNullOrEmpty(isp)) sb.AppendLine($"ISP: {isp}");
+                    if (!string.IsNullOrEmpty(interfaceName)) sb.AppendLine($"Interface: {interfaceName}");
+                    if (!string.IsNullOrEmpty(macAddr)) sb.AppendLine($"MAC Address: {macAddr}");
+                    sb.AppendLine($"Is VPN: {isVpn}");
+                    if (!string.IsNullOrEmpty(internalIp)) sb.AppendLine($"Internal IP: {internalIp}");
+                    if (!string.IsNullOrEmpty(externalIp)) sb.AppendLine($"External IP: {externalIp}");
+                    sb.AppendLine();
+                    sb.AppendLine("SPEED RESULTS");
+                    sb.AppendLine("-------------");
+                    sb.AppendLine($"Download : {Math.Round(download, 2)} Mbps");
+                    sb.AppendLine($"Upload   : {Math.Round(upload, 2)} Mbps");
+                    sb.AppendLine($"Ping     : {Math.Round(ping, 2)} ms");
+                    sb.AppendLine($"Jitter   : {Math.Round(jitter, 2)} ms");
+                    sb.AppendLine($"Packet Loss: {Math.Round(packetLoss, 2)} %");
+                    sb.AppendLine();
+                    sb.AppendLine("DOWNLOAD LATENCY (ms)");
+                    sb.AppendLine($"  IQM : {Math.Round(dl_iqm, 3)}");
+                    sb.AppendLine($"  Low : {Math.Round(dl_low, 3)}");
+                    sb.AppendLine($"  High: {Math.Round(dl_high, 3)}");
+                    sb.AppendLine($"  Jitter: {Math.Round(dl_jitter, 3)}");
+                    sb.AppendLine();
+                    sb.AppendLine("UPLOAD LATENCY (ms)");
+                    sb.AppendLine($"  IQM : {Math.Round(ul_iqm, 3)}");
+                    sb.AppendLine($"  Low : {Math.Round(ul_low, 3)}");
+                    sb.AppendLine($"  High: {Math.Round(ul_high, 3)}");
+                    sb.AppendLine($"  Jitter: {Math.Round(ul_jitter, 3)}");
+                    sb.AppendLine();
+                    if (!string.IsNullOrEmpty(resultUrl)) sb.AppendLine($"Result URL: {resultUrl}");
+
+                    File.WriteAllText(outputFile, sb.ToString());
+
+                    return new SpeedTestResult { Download = Math.Round(download, 2), Upload = Math.Round(upload, 2), Ping = Math.Round(ping, 2), Jitter = Math.Round(jitter, 2), PacketLoss = Math.Round(packetLoss, 2) };
                 }
                 catch (Exception ex)
                 {
+                    // If parsing fails, preserve raw output to the requested file so user still sees data
+                    try { File.WriteAllText(outputFile, output); } catch { }
                     File.AppendAllText(outputFile, "\n// Error parsing JSON: " + ex.ToString());
                     Console.WriteLine("Error parsing speedtest JSON: " + ex.Message);
                     return null;
@@ -817,6 +925,35 @@ static string SanitizeFileName(string name)
             sb.AppendLine($"  Download: {speed.Download} Mbps");
             sb.AppendLine($"  Upload: {speed.Upload} Mbps");
             sb.AppendLine($"  Ping: {Math.Round(speed.Ping, 3)} ms");
+            sb.AppendLine($"  Jitter: {Math.Round(speed.Jitter, 3)} ms");
+            sb.AppendLine($"  Packet Loss: {Math.Round(speed.PacketLoss, 3)} %");
+
+            // Try to include more detailed info from the human-readable speedtest results file if present
+            try
+            {
+                var speedTxt = Path.Combine(Path.GetDirectoryName(outputFile) ?? string.Empty, "speedtest_results.txt");
+                if (File.Exists(speedTxt))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("SPEEDTEST DETAILS");
+                    sb.AppendLine("-----------------");
+                    var lines = File.ReadAllLines(speedTxt);
+                    // Include key lines: Server Name/Host/Server IP/Server ID, Interface, MAC, Is VPN, Result URL/ID
+                    foreach (var l in lines)
+                    {
+                        if (l.StartsWith("Name:") || l.StartsWith("Host:") || l.StartsWith("Server IP:") || l.StartsWith("Server Port:") || l.StartsWith("Server ID:") || l.StartsWith("Interface:") || l.StartsWith("MAC Address:") || l.StartsWith("Is VPN:") || l.StartsWith("Internal IP:") || l.StartsWith("External IP:") || l.StartsWith("Result URL:") )
+                        {
+                            sb.AppendLine(l.Trim());
+                        }
+                        // Also include latency blocks (IQM/Low/High/Jitter) and latency headers once
+                        if (l.StartsWith("DOWNLOAD LATENCY") || l.StartsWith("UPLOAD LATENCY") || l.TrimStart().StartsWith("IQM :") || l.TrimStart().StartsWith("Low :") || l.TrimStart().StartsWith("High:") || l.TrimStart().StartsWith("Jitter:"))
+                        {
+                            sb.AppendLine(l.Trim());
+                        }
+                    }
+                }
+            }
+            catch { }
         }
         sb.AppendLine();
 
