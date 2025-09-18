@@ -78,20 +78,21 @@
                    Width="100" 
                    Margin="198,4,198,0"/>
 
-            <!-- Progress Bar -->
-            <ProgressBar x:Name="ProgressBar" 
-                         Grid.Row="2" 
-                         Height="20" 
-                         Margin="30,10,30,10" 
-                         IsIndeterminate="False"/>
+            <!-- Progress Bar (cleaner look) -->
+            <Border x:Name="ProgressBorder" Grid.Row="2" Margin="30,10,30,10" CornerRadius="6" Background="#e9ecef" Height="32" Visibility="Collapsed">
+                <Grid>
+                    <ProgressBar x:Name="ProgressBar" Height="18" Margin="6,4,90,4" IsIndeterminate="False" Maximum="100" Value="0" Foreground="#27ae60" Background="#e9ecef"/>
+                    <TextBlock x:Name="SecondsRemainingText" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0" FontSize="12" Foreground="#2c3e50" Text="" />
+                </Grid>
+            </Border>
 
             <!-- Status Text -->
             <TextBlock x:Name="StatusText" 
                        Grid.Row="3" 
                        Text="Ready to start analysis" 
                        HorizontalAlignment="Center" 
-                       Margin="0,5,0,15" 
-                       FontSize="14"/>
+                       Margin="0,8,0,15" 
+                       FontSize="14" Foreground="#2c3e50"/>
 
             <!-- Buttons (keeping original Start/Stop buttons and adding Close button) -->
             <StackPanel Grid.Row="4" 

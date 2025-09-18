@@ -141,16 +141,36 @@ namespace Ace_NDT_v2
                         isAnalysisRunning = true;
 
                         // Update UI
+                        ProgressBorder.Visibility = Visibility.Visible;
                         ProgressBar.IsIndeterminate = true;
                         StartButton.IsEnabled = false;
                         StopButton.IsEnabled = true;
-                        StatusText.Text = "Analysis in progress...";
+                        StatusText.Text = "Starting Ace Cloud Gateway Servers Scanning";
 
                         try
                         {
                             _cts = new CancellationTokenSource();
                             var svc = new NativeAnalyzer.AnalyzerService();
                             var progressReporter = new Progress<string>(s => Dispatcher.Invoke(() => StatusText.Text = s));
+                            // Percent progress reporter (0-100)
+                            var percentReporter = new Progress<int>(p => Dispatcher.Invoke(() =>
+                            {
+                                try
+                                {
+                                    ProgressBar.Value = Math.Max(0, Math.Min(100, p));
+                                    // If p < 100, estimate seconds remaining using the test duration (60s)
+                                    if (p >= 0 && p < 100)
+                                    {
+                                        int secondsRemaining = (int)Math.Ceiling((100 - p) * 60.0 / 100.0);
+                                        SecondsRemainingText.Text = $"{secondsRemaining}s remaining";
+                                    }
+                                    else
+                                    {
+                                        SecondsRemainingText.Text = string.Empty;
+                                    }
+                                }
+                                catch { }
+                            }));
 
                             // Run analyzer in background without blocking UI
                             _ = Task.Run(async () =>
@@ -159,7 +179,7 @@ namespace Ace_NDT_v2
                                 {
                                     // Pass user's Downloads folder as base output folder
                                     var downloadsBase = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "Ace Network Result");
-                                    var outFolder = await svc.RunAnalysisAsync(downloadsBase, progressReporter, _cts.Token);
+                                    var outFolder = await svc.RunAnalysisAsync(downloadsBase, progressReporter, _cts.Token, percentReporter);
                                     Dispatcher.Invoke(() =>
                                     {
                                         StatusText.Text = "Analysis completed.";
@@ -167,15 +187,26 @@ namespace Ace_NDT_v2
                                         ViewResultButton.Background = new SolidColorBrush(Colors.LightGreen);
                                         isAnalysisRunning = false;
                                         ProgressBar.IsIndeterminate = false;
+                                        ProgressBorder.Visibility = Visibility.Collapsed;
                                     });
                                 }
                                 catch (OperationCanceledException)
                                 {
-                                    Dispatcher.Invoke(() => StatusText.Text = "Analysis canceled by user.");
+                                    Dispatcher.Invoke(() =>
+                                    {
+                                        StatusText.Text = "Analysis canceled by user.";
+                                        ProgressBar.IsIndeterminate = false;
+                                        ProgressBorder.Visibility = Visibility.Collapsed;
+                                    });
                                 }
                                 catch (Exception ex)
                                 {
-                                    Dispatcher.Invoke(() => StatusText.Text = "Error: " + ex.Message);
+                                    Dispatcher.Invoke(() =>
+                                    {
+                                        StatusText.Text = "Error: " + ex.Message;
+                                        ProgressBar.IsIndeterminate = false;
+                                        ProgressBorder.Visibility = Visibility.Collapsed;
+                                    });
                                 }
                                 finally
                                 {
