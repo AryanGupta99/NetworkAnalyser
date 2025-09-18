@@ -14,6 +14,7 @@ using System.Net.Http;
 using System.IO.Compression;
 using System.Linq;
 using System.Text.Json;
+using System.Drawing.Imaging;
 
 namespace NativeAnalyzer
 {
@@ -34,10 +35,19 @@ namespace NativeAnalyzer
 
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
+
     // ShowWindow declared once below; SW_RESTORE constant kept here
     private const int SW_RESTORE = 9;
     [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")]
     private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+    private static readonly IntPtr HWND_TOP = IntPtr.Zero;
+    private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_SHOWWINDOW = 0x0040;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
@@ -95,13 +105,19 @@ namespace NativeAnalyzer
             var speedTest = await StartSpeedTest(Path.Combine(outputFolder, "speedtest_results.txt"));
 
             var targets = new[] { "RDGCHG.myrealdata.net", "RDGHTN.myrealdata.net", "RDGNV.myrealdata.net", "RDGATL.myrealdata.net", "RDGDEN.myrealdata.net" };
-            var tcpingResults = new List<TcpingResult>();
 
-            foreach (var target in targets)
-            {
-                var r = await StartParallelTests(target, outputFolder, 60);
-                if (r != null) tcpingResults.Add(r);
-            }
+            // Announce start of gateway scanning
+            var startMsg = "Starting Ace Cloud Gateway Servers Scanning";
+            Console.WriteLine(startMsg);
+            Log(startMsg);
+
+            // Run tcping and WinMTR tests concurrently across all targets
+            var tcpingResults = await RunConcurrentGatewayScans(targets.ToList(), outputFolder, 60);
+
+            // Announce completion of gateway scanning and move to report generation
+            var genMsg = "Generating Analysis Reports";
+            Console.WriteLine(genMsg);
+            Log(genMsg);
 
             Console.WriteLine("Creating summary report...");
             CreateSummaryReport(systemInfo, speedTest, tcpingResults, Path.Combine(outputFolder, "summary_report.txt"));
@@ -476,135 +492,295 @@ namespace NativeAnalyzer
             }
         }
 
-    public static async Task<TcpingResult?> StartParallelTests(string target, string outputFolder, int testDurationSeconds)
+    public static async Task<List<TcpingResult>> RunConcurrentGatewayScans(List<string> gateways, string outputFolder, int testDurationSeconds, IProgress<int>? percentProgress = null, IProgress<string>? statusProgress = null)
     {
+        var results = new List<TcpingResult>();
+
         var tcpingPath = Path.Combine(AppContext.BaseDirectory, "tcping.exe");
         var winmtrPath = Path.Combine(AppContext.BaseDirectory, "WinMTR.exe");
 
-        var tcpingOutput = Path.Combine(outputFolder, target + "_tcping.txt");
-
-            if (!File.Exists(tcpingPath))
+        async Task<string?> FindExe(string defaultPath, string exeName)
         {
-            // try to find in PATH
+            if (File.Exists(defaultPath)) return defaultPath;
             try
             {
-                var wherePsi = new ProcessStartInfo("where", "tcping.exe") { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
+                var wherePsi = new ProcessStartInfo("where", exeName) { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
                 using var whereProc = Process.Start(wherePsi);
                 if (whereProc != null)
                 {
-                    var whereOut = await whereProc.StandardOutput.ReadToEndAsync();
+                    var outStr = await whereProc.StandardOutput.ReadToEndAsync();
                     whereProc.WaitForExit();
-                    var first = whereOut.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-                    if (!string.IsNullOrEmpty(first) && File.Exists(first)) tcpingPath = first.Trim();
+                    var first = outStr.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+                    if (!string.IsNullOrEmpty(first) && File.Exists(first)) return first.Trim();
                 }
             }
             catch { }
+            return null;
         }
 
-        if (!File.Exists(tcpingPath))
-        {
-            Console.WriteLine("tcping.exe not found; TCPing will be skipped for " + target);
-            File.WriteAllText(tcpingOutput, "TCPing executable not found. Test skipped.");
-        }
-        else
-        {
-            var tcpProc = new ProcessStartInfo(tcpingPath, $"-n 30 {target} 443")
-            {
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var p = Process.Start(tcpProc);
-            if (p != null)
-            {
-                var outStr = await p.StandardOutput.ReadToEndAsync();
-                File.WriteAllText(tcpingOutput, outStr);
-                p.WaitForExit();
-            }
-        }
+        var tcpingResolved = await FindExe(tcpingPath, "tcping.exe") ?? string.Empty;
+        var winmtrResolved = await FindExe(winmtrPath, "WinMTR.exe") ?? string.Empty;
 
-        if (File.Exists(winmtrPath))
-        {
-            Log($"Starting WinMTR from {winmtrPath}");
-            // Start WinMTR normally so its window is visible for screenshots
-            var winmtrProc = new ProcessStartInfo(winmtrPath, target)
-            {
-                UseShellExecute = true,
-                CreateNoWindow = false,
-                WindowStyle = ProcessWindowStyle.Normal
-            };
+        var winProcs = new Dictionary<string, Process>();
 
-            var proc = Process.Start(winmtrProc);
-            if (proc == null)
+        // Start WinMTR processes first (so windows are present when tcping completes)
+        if (!string.IsNullOrEmpty(winmtrResolved))
+        {
+            var handleWaitTasks = new List<Task>();
+            foreach (var gateway in gateways)
             {
-                Log("Failed to start WinMTR process");
-                return null;
-            }
-            // Do not hide the WinMTR window — allow it to be visible so screenshots work
-            
-            Log($"Running WinMTR for {target} for {testDurationSeconds} seconds...");
-            
-            // Give WinMTR time to start collecting data
-            await Task.Delay((testDurationSeconds - 5) * 1000);
-            
-            // Take screenshot when data is collected
-            var screenshotPath = Path.Combine(outputFolder, target + "_winmtr.png");
-            Log($"Attempting to capture screenshot to {screenshotPath}");
-            TakeScreenshot(screenshotPath);
-            
-            // Wait remaining time and cleanup
-            await Task.Delay(5000);
-            try 
-            { 
-                if (!proc.HasExited)
+                try
                 {
-                    Log("Terminating WinMTR process");
-                    proc.Kill(); 
+                    var psi = new ProcessStartInfo(winmtrResolved, gateway)
+                    {
+                        UseShellExecute = true,
+                        CreateNoWindow = false,
+                        WindowStyle = ProcessWindowStyle.Normal
+                    };
+                    var proc = Process.Start(psi);
+                    if (proc != null)
+                    {
+                        Log($"WinMTR started for {gateway} (PID: {proc.Id})");
+                        // store process reference immediately
+                        winProcs[gateway] = proc;
+
+                        // Start a background task to wait for the main window handle without blocking the loop
+                        handleWaitTasks.Add(Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var sw = Stopwatch.StartNew();
+                                while (sw.ElapsedMilliseconds < 7000)
+                                {
+                                    proc.Refresh();
+                                    if (proc.MainWindowHandle != IntPtr.Zero) break;
+                                    await Task.Delay(200);
+                                }
+                            }
+                            catch (Exception ex) { Log($"WinMTR handle wait error for {gateway}: {ex.Message}"); }
+                        }));
+                    }
+                    else Log($"Failed to start WinMTR for {gateway}");
                 }
-            } 
-            catch (Exception ex) 
-            { 
-                Log($"Error terminating WinMTR: {ex.Message}");
+                catch (Exception ex)
+                {
+                    Log($"Exception starting WinMTR for {gateway}: {ex.Message}");
+                }
             }
+
+            // Wait for all handle-wait tasks to complete in parallel (non-blocking start above)
+            try { await Task.WhenAll(handleWaitTasks); } catch { }
         }
         else
         {
-            Log($"WinMTR executable not found at {winmtrPath}");
+            Log("WinMTR not found; skipping WinMTR launches.");
         }
 
-        string tcpData = File.Exists(tcpingOutput) ? File.ReadAllText(tcpingOutput) : string.Empty;
-        return new TcpingResult { Target = target, TCPingData = tcpData };
-    }
+        // Start tcping tasks concurrently but do not rely on their completion to take screenshots.
+        // We'll run tcping with the duration specified by testDurationSeconds and capture screenshots simultaneously at the end.
+        var tcpingTasks = new List<Task<(string Target, string Output)>>();
+        foreach (var gateway in gateways)
+        {
+            if (!string.IsNullOrEmpty(tcpingResolved))
+            {
+                var outPath = Path.Combine(outputFolder, SanitizeFileName(gateway) + "_tcping.txt");
+                tcpingTasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        // Start tcping with exact packet count equal to testDurationSeconds
+                        var psi = new ProcessStartInfo(tcpingResolved, $"-n {testDurationSeconds} {gateway} 443")
+                        {
+                            RedirectStandardOutput = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        };
+                        using var p = Process.Start(psi);
+                        if (p != null)
+                        {
+                            var o = await p.StandardOutput.ReadToEndAsync();
+                            // do not wait here for exit; we'll wait for tcping tasks below
+                            File.WriteAllText(outPath, o);
+                            Log($"tcping started for {gateway}, output will be saved to {outPath}");
+                            return (gateway, o);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"tcping error for {gateway}: {ex.Message}");
+                        File.WriteAllText(outPath, "tcping error: " + ex.ToString());
+                    }
+                    return (gateway, string.Empty);
+                }));
+            }
+            else
+            {
+                var outPath = Path.Combine(outputFolder, SanitizeFileName(gateway) + "_tcping.txt");
+                File.WriteAllText(outPath, "tcping not found; skipped.");
+                tcpingTasks.Add(Task.FromResult((gateway, File.ReadAllText(outPath))));
+            }
+        }
 
-    [DllImport("user32.dll")]
-    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-    private const int SW_HIDE = 0;
-
-    private static void TryHideProcessWindow(Process proc, int timeoutMilliseconds = 2000)
-    {
+        // Arrange/tile WinMTR windows across the primary screen evenly
         try
         {
-            var sw = Stopwatch.StartNew();
-            while (sw.ElapsedMilliseconds < timeoutMilliseconds)
+            var screen = Screen.PrimaryScreen.Bounds;
+            int n = winProcs.Count;
+            if (n > 0)
             {
-                proc.Refresh();
-                var h = proc.MainWindowHandle;
-                if (h != IntPtr.Zero)
+                int cols = (int)Math.Ceiling(Math.Sqrt(n));
+                int rows = (int)Math.Ceiling((double)n / cols);
+                int w = screen.Width / cols;
+                int h = screen.Height / rows;
+                int idx = 0;
+                foreach (var kv in winProcs)
                 {
-                    ShowWindow(h, SW_HIDE);
-                    break;
+                    try
+                    {
+                        var p = kv.Value;
+                        p.Refresh();
+                        var hWnd = p.MainWindowHandle;
+                        if (hWnd == IntPtr.Zero) continue;
+                        int col = idx % cols;
+                        int row = idx / cols;
+                        int x = screen.Left + col * w;
+                        int y = screen.Top + row * h;
+                        SetWindowPos(hWnd, HWND_TOP, x, y, w, h, SWP_NOZORDER | SWP_SHOWWINDOW);
+                        idx++;
+                    }
+                    catch (Exception ex) { Log($"Tiling error: {ex.Message}"); }
                 }
-                Thread.Sleep(100);
             }
         }
-        catch
+        catch (Exception ex) { Log($"Tiling windows failed: {ex.Message}"); }
+
+        // Wait for the full test duration (this will be the moment we take screenshots).
+        Log($"Waiting {testDurationSeconds} seconds for tcping/WinMTR to run before taking screenshots...");
+        for (int elapsed = 0; elapsed < testDurationSeconds; elapsed++)
         {
-            // best-effort; ignore any failures
+            // Report progress as percentage complete (elapsed seconds)
+            try { percentProgress?.Report((int)Math.Round((double)elapsed / testDurationSeconds * 100)); } catch { }
+            await Task.Delay(1000);
         }
+        // final report: 100%
+        try { percentProgress?.Report(100); } catch { }
+
+        // At the end of the interval, capture all WinMTR windows simultaneously
+        var captureTasks = new List<Task>();
+        foreach (var kv in winProcs)
+        {
+            var gateway = kv.Key;
+            var proc = kv.Value;
+            captureTasks.Add(Task.Run(() =>
+            {
+                try
+                {
+                    proc.Refresh();
+                    var h = proc.MainWindowHandle;
+                    if (h == IntPtr.Zero) return;
+                    var screenshotPath = Path.Combine(outputFolder, SanitizeFileName(gateway) + "_winmtr.png");
+                    var captured = CaptureWindow(h, screenshotPath);
+                    if (!captured)
+                    {
+                        Log($"CaptureWindow failed for {gateway}, falling back to TakeScreenshot");
+                        TakeScreenshot(screenshotPath);
+                    }
+                }
+                catch (Exception ex) { Log($"Capture error for {gateway}: {ex.Message}"); }
+            }));
+        }
+
+    try { await Task.WhenAll(captureTasks); } catch { }
+
+    // Inform UI/reporting that captures are done and we're generating reports
+    try { statusProgress?.Report("Generating Analysis Reports"); } catch { }
+
+        // Ensure any remaining WinMTR processes are cleaned up
+        foreach (var kv in winProcs)
+        {
+            try { if (!kv.Value.HasExited) kv.Value.Kill(); }
+            catch { }
+        }
+
+        // Wait for tcping tasks to finish and collect results
+        var tcpResults = await Task.WhenAll(tcpingTasks);
+        foreach (var t in tcpResults)
+        {
+            results.Add(new TcpingResult { Target = t.Target, TCPingData = t.Output });
+        }
+
+        return results;
     }
 
-    
+    // Replace CaptureWindow stub with a real implementation that saves the window specified by handle
+static bool CaptureWindow(IntPtr hWnd, string filePath)
+{
+    try
+    {
+        if (hWnd == IntPtr.Zero)
+        {
+            Log("CaptureWindow: hWnd is zero");
+            return false;
+        }
+
+        if (!GetWindowRect(hWnd, out var rect))
+        {
+            Log("CaptureWindow: GetWindowRect failed");
+            return false;
+        }
+
+        int width = Math.Max(1, rect.Right - rect.Left);
+        int height = Math.Max(1, rect.Bottom - rect.Top);
+
+        using var bmp = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(bmp);
+
+        var hdc = g.GetHdc();
+        try
+        {
+            var ok = PrintWindow(hWnd, hdc, 0);
+            g.ReleaseHdc(hdc);
+            if (!ok)
+            {
+                // fallback to screen capture of the window rectangle
+                g.CopyFromScreen(rect.Left, rect.Top, 0, 0, new Size(width, height), CopyPixelOperation.SourceCopy);
+            }
+        }
+        catch (Exception ex)
+        {
+            try { g.ReleaseHdc(hdc); } catch { }
+            Log($"CaptureWindow PrintWindow exception: {ex.Message}");
+            // fallback to CopyFromScreen
+            try { g.CopyFromScreen(rect.Left, rect.Top, 0, 0, new Size(width, height), CopyPixelOperation.SourceCopy); }
+            catch (Exception ex2) { Log($"CaptureWindow CopyFromScreen failed: {ex2.Message}"); }
+        }
+
+        // Ensure output directory exists
+        var dir = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+
+        bmp.Save(filePath, ImageFormat.Png);
+        Log($"CaptureWindow saved: {filePath}");
+        return true;
+    }
+    catch (Exception ex)
+    {
+        Log($"CaptureWindow failed: {ex.Message}");
+        return false;
+    }
+}
+
+// Utility to sanitize filenames
+static string SanitizeFileName(string name)
+{
+    var invalid = Path.GetInvalidFileNameChars();
+    var sb = new StringBuilder(name.Length);
+    foreach (var c in name)
+    {
+        sb.Append(invalid.Contains(c) ? '_' : c);
+    }
+    return sb.ToString();
+}
 
     public static void CreateSummaryReport(SystemInfo sys, SpeedTestResult? speed, List<TcpingResult> tcpResults, string outputFile)
     {
@@ -732,6 +908,30 @@ namespace NativeAnalyzer
         return results;
     }
 
-    // Duplicate record types removed. Use the public records declared in SystemInfo.cs
+    // Duplicate recor
+    // 
+    // d types removed. Use the public records declared in SystemInfo.cs
+
+    // Backwards-compatible wrapper expected by AnalyzerService
+    public static async Task<TcpingResult?> StartParallelTests(string target, string outputFolder, int testDurationSeconds)
+    {
+        var startMsg = "Starting Ace Cloud Gateway Servers Scanning";
+        Console.WriteLine(startMsg);
+        Log(startMsg);
+
+        var list = new List<string> { target };
+        var results = await RunConcurrentGatewayScans(list, outputFolder, testDurationSeconds);
+
+        // After WinMTR/tcping sessions close, indicate we're generating reports
+        var genMsg = "Generating Analysis Reports";
+        Console.WriteLine(genMsg);
+        Log(genMsg);
+
+        var doneMsg = "Completed Ace Cloud Gateway Servers Scanning";
+        Console.WriteLine(doneMsg);
+        Log(doneMsg);
+
+        return results.FirstOrDefault();
+    }
 }
 }
