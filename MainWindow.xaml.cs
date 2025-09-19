@@ -97,7 +97,6 @@ namespace Ace_NDT_v2
 
                 // Reset the manual stop flag when starting a new analysis
                 isManualStop = false;
-
                 // Disable the View Result button when starting a new analysis
                 ViewResultButton.IsEnabled = false;
                 ViewResultButton.Background = new SolidColorBrush(Colors.LightGray);

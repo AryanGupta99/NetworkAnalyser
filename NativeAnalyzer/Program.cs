@@ -36,6 +36,50 @@ namespace NativeAnalyzer
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
 
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    static void BringCurrentProcessWindowToFront()
+    {
+        try
+        {
+            var currentPid = (uint)Process.GetCurrentProcess().Id;
+            IntPtr found = IntPtr.Zero;
+            EnumWindows((hWnd, lParam) =>
+            {
+                if (!IsWindowVisible(hWnd)) return true; // continue enumerating
+                GetWindowThreadProcessId(hWnd, out var pid);
+                if (pid == currentPid)
+                {
+                    found = hWnd;
+                    return false; // stop enumeration
+                }
+                return true;
+            }, IntPtr.Zero);
+
+            if (found != IntPtr.Zero)
+            {
+                // Restore and bring to front. Toggle topmost briefly to ensure visibility over new windows.
+                ShowWindow(found, SW_RESTORE);
+                // Make topmost
+                try { SetWindowPos(found, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW); } catch { }
+                SetForegroundWindow(found);
+                Thread.Sleep(300);
+                // Remove topmost so window behaves normally
+                try { SetWindowPos(found, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW); } catch { }
+                Thread.Sleep(150);
+            }
+        }
+        catch { }
+    }
+
     // ShowWindow declared once below; SW_RESTORE constant kept here
     private const int SW_RESTORE = 9;
     [DllImport("user32.dll")]
@@ -48,6 +92,10 @@ namespace NativeAnalyzer
     private static readonly IntPtr HWND_TOP = IntPtr.Zero;
     private const uint SWP_NOZORDER = 0x0004;
     private const uint SWP_SHOWWINDOW = 0x0040;
+    private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
@@ -541,21 +589,14 @@ namespace NativeAnalyzer
                     sb.AppendLine();
                     sb.AppendLine("SERVER INFORMATION");
                     sb.AppendLine("------------------");
+                    // Only include non-sensitive server information: name and location
                     if (!string.IsNullOrEmpty(serverName)) sb.AppendLine($"Name: {serverName}");
-                    if (!string.IsNullOrEmpty(serverHost)) sb.AppendLine($"Host: {serverHost}");
-                    if (!string.IsNullOrEmpty(serverIp)) sb.AppendLine($"Server IP: {serverIp}");
-                    if (serverPort != 0) sb.AppendLine($"Server Port: {serverPort}");
-                    if (!string.IsNullOrEmpty(serverId)) sb.AppendLine($"Server ID: {serverId}");
                     if (!string.IsNullOrEmpty(serverLocation) || !string.IsNullOrEmpty(serverCountry)) sb.AppendLine($"Location: {serverLocation}{(string.IsNullOrEmpty(serverLocation) ? "" : ", ")}{serverCountry}");
                     sb.AppendLine();
                     sb.AppendLine("CONNECTION INFORMATION");
                     sb.AppendLine("----------------------");
+                    // Only include useful connection info; avoid exposing MAC, VPN, or IP addresses
                     if (!string.IsNullOrEmpty(isp)) sb.AppendLine($"ISP: {isp}");
-                    if (!string.IsNullOrEmpty(interfaceName)) sb.AppendLine($"Interface: {interfaceName}");
-                    if (!string.IsNullOrEmpty(macAddr)) sb.AppendLine($"MAC Address: {macAddr}");
-                    sb.AppendLine($"Is VPN: {isVpn}");
-                    if (!string.IsNullOrEmpty(internalIp)) sb.AppendLine($"Internal IP: {internalIp}");
-                    if (!string.IsNullOrEmpty(externalIp)) sb.AppendLine($"External IP: {externalIp}");
                     sb.AppendLine();
                     sb.AppendLine("SPEED RESULTS");
                     sb.AppendLine("-------------");
@@ -634,6 +675,10 @@ namespace NativeAnalyzer
         // Start WinMTR processes first (so windows are present when tcping completes)
         if (!string.IsNullOrEmpty(winmtrResolved))
         {
+            // Ensure this application window is foreground before launching WinMTR so WinMTR windows
+            // don't end up above our app unexpectedly. Make app topmost while starting/tile WinMTR.
+            try { SetCurrentAppTopmost(true); } catch { }
+
             var handleWaitTasks = new List<Task>();
             foreach (var gateway in gateways)
             {
@@ -779,15 +824,17 @@ namespace NativeAnalyzer
         {
             var gateway = kv.Key;
             var proc = kv.Value;
-            captureTasks.Add(Task.Run(() =>
+                captureTasks.Add(Task.Run(() =>
             {
                 try
                 {
                     proc.Refresh();
                     var h = proc.MainWindowHandle;
                     if (h == IntPtr.Zero) return;
-                    var screenshotPath = Path.Combine(outputFolder, SanitizeFileName(gateway) + "_winmtr.png");
-                    var captured = CaptureWindow(h, screenshotPath);
+                        // Maximize and bring to foreground so we capture full window
+                        try { MaximizeWindowAndWait(h); } catch { }
+                        var screenshotPath = Path.Combine(outputFolder, SanitizeFileName(gateway) + "_winmtr.png");
+                        var captured = CaptureWindow(h, screenshotPath);
                     if (!captured)
                     {
                         Log($"CaptureWindow failed for {gateway}, falling back to TakeScreenshot");
@@ -802,6 +849,9 @@ namespace NativeAnalyzer
 
     // Inform UI/reporting that captures are done and we're generating reports
     try { statusProgress?.Report("Generating Analysis Reports"); } catch { }
+
+    // Restore app topmost state to normal so user windows behave normally
+    try { SetCurrentAppTopmost(false); } catch { }
 
         // Ensure any remaining WinMTR processes are cleaned up
         foreach (var kv in winProcs)
@@ -878,6 +928,63 @@ static bool CaptureWindow(IntPtr hWnd, string filePath)
     }
 }
 
+// Cached handle to the app window used when toggling topmost state
+static IntPtr cachedAppWindow = IntPtr.Zero;
+
+static void SetCurrentAppTopmost(bool makeTopmost)
+{
+    try
+    {
+        if (cachedAppWindow == IntPtr.Zero)
+        {
+            var currentPid = (uint)Process.GetCurrentProcess().Id;
+            EnumWindows((hWnd, lParam) =>
+            {
+                if (!IsWindowVisible(hWnd)) return true;
+                GetWindowThreadProcessId(hWnd, out var pid);
+                if (pid == currentPid)
+                {
+                    cachedAppWindow = hWnd;
+                    return false;
+                }
+                return true;
+            }, IntPtr.Zero);
+        }
+
+        if (cachedAppWindow != IntPtr.Zero)
+        {
+            if (makeTopmost)
+            {
+                SetWindowPos(cachedAppWindow, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+                ShowWindow(cachedAppWindow, SW_RESTORE);
+                SetForegroundWindow(cachedAppWindow);
+            }
+            else
+            {
+                SetWindowPos(cachedAppWindow, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            }
+        }
+    }
+    catch { }
+}
+
+// Attempt to maximize a window and wait a short time for it to repaint/resize
+static void MaximizeWindowAndWait(IntPtr hWnd)
+{
+    try
+    {
+        // SW_MAXIMIZE = 3
+        ShowWindow(hWnd, 3);
+        SetForegroundWindow(hWnd);
+        // Give the window some time to resize and redraw
+        Thread.Sleep(450);
+        // Try again to ensure it's maximized
+        ShowWindow(hWnd, 3);
+        Thread.Sleep(200);
+    }
+    catch { }
+}
+
 // Utility to sanitize filenames
 static string SanitizeFileName(string name)
 {
@@ -898,35 +1005,218 @@ static string SanitizeFileName(string name)
         sb.AppendLine(new string('*', 77));
         sb.AppendLine();
 
+        // Thresholds (user-specified)
+        const double DOWNLOAD_THRESHOLD = 20.0; // Mbps
+        const double UPLOAD_THRESHOLD = 20.0; // Mbps
+        const double DL_LATENCY_THRESHOLD = 25.0; // ms
+        const double UL_LATENCY_THRESHOLD = 25.0; // ms
+        const double PING_THRESHOLD = 10.0; // ms
+        const double RAM_THRESHOLD = 90.0; // percent
+        const double CPU_THRESHOLD = 90.0; // percent
+        const double DISK_FREE_THRESHOLD = 20.0; // percent free
+        const double UPTIME_DAYS_THRESHOLD = 2.0; // days
+
         // SYSTEM HEALTH
-        sb.AppendLine("SYSTEM HEALTH CHECK");
-        sb.AppendLine("------------------");
-        if (sys.RAMUsage > 80 || sys.CPUUsage > 80)
+    sb.AppendLine("SYSTEM HEALTH CHECK");
+    sb.AppendLine(new string('=', 28));
+        var systemIssues = new List<string>();
+        if (sys.RAMUsage >= RAM_THRESHOLD) systemIssues.Add($"WARNING: High RAM usage ({sys.RAMUsage}%) (threshold {RAM_THRESHOLD}%)");
+        if (sys.CPUUsage >= CPU_THRESHOLD) systemIssues.Add($"WARNING: High CPU usage ({sys.CPUUsage}%) (threshold {CPU_THRESHOLD}%)");
+        if (sys.Uptime.TotalDays >= UPTIME_DAYS_THRESHOLD) systemIssues.Add($"WARNING: System uptime is {sys.Uptime.Days} days {sys.Uptime.Hours} hours (recommended < {UPTIME_DAYS_THRESHOLD} days)");
+
+        // Check disk free percentage across drives
+        try
         {
-            if (sys.RAMUsage > 80) sb.AppendLine($"! WARNING: High RAM usage ({sys.RAMUsage}%)");
-            if (sys.CPUUsage > 80) sb.AppendLine($"! WARNING: High CPU usage ({sys.CPUUsage}%)");
+            using var searcher = new ManagementObjectSearcher("SELECT * FROM Win32_LogicalDisk WHERE DriveType=3");
+            foreach (ManagementObject obj in searcher.Get())
+            {
+                var drive = obj["DeviceID"]?.ToString() ?? "?";
+                var sizeObj = obj["Size"];
+                var freeObj = obj["FreeSpace"];
+                if (sizeObj != null && freeObj != null)
+                {
+                    var total = Convert.ToDouble(sizeObj);
+                    var free = Convert.ToDouble(freeObj);
+                    var freePct = total > 0 ? Math.Round((free / total) * 100.0, 2) : 0.0;
+                    if (freePct < DISK_FREE_THRESHOLD) systemIssues.Add($"WARNING: Low disk free space on {drive} ({freePct}% free, threshold {DISK_FREE_THRESHOLD}% )");
+                }
+            }
+        }
+        catch { }
+
+        if (systemIssues.Count == 0)
+        {
+            sb.AppendLine("✓ No system issues detected.");
         }
         else
         {
-            sb.AppendLine("✓ No system issues detected.");
+            foreach (var it in systemIssues) sb.AppendLine("! " + it);
         }
         sb.AppendLine();
 
         // INTERNET
-        sb.AppendLine("INTERNET CONNECTION CHECK");
-        sb.AppendLine("------------------------");
+    sb.AppendLine("INTERNET CONNECTION CHECK");
+    sb.AppendLine(new string('=', 24));
         if (speed == null)
         {
             sb.AppendLine("ERROR: Could not perform speed test.");
+            sb.AppendLine();
         }
         else
         {
-            sb.AppendLine("✓ Internet connection appears healthy.");
             sb.AppendLine($"  Download: {speed.Download} Mbps");
             sb.AppendLine($"  Upload: {speed.Upload} Mbps");
             sb.AppendLine($"  Ping: {Math.Round(speed.Ping, 3)} ms");
             sb.AppendLine($"  Jitter: {Math.Round(speed.Jitter, 3)} ms");
             sb.AppendLine($"  Packet Loss: {Math.Round(speed.PacketLoss, 3)} %");
+            sb.AppendLine();
+
+            // Parse speedtest_results.txt for detailed latency numbers (IQM) if present
+            double? dlIQM = null, ulIQM = null;
+            try
+            {
+                var speedTxt = Path.Combine(Path.GetDirectoryName(outputFile) ?? string.Empty, "speedtest_results.txt");
+                if (File.Exists(speedTxt))
+                {
+                    var lines = File.ReadAllLines(speedTxt);
+                    for (int i = 0; i < lines.Length; i++)
+                    {
+                        var line = lines[i].Trim();
+                        if (line.StartsWith("DOWNLOAD LATENCY", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // look ahead for IQM
+                            for (int j = i + 1; j < Math.Min(i + 6, lines.Length); j++)
+                            {
+                                var t = lines[j].Trim();
+                                if (t.StartsWith("IQM", StringComparison.OrdinalIgnoreCase) || t.StartsWith("IQM :", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    var parts = t.Split(':');
+                                    if (parts.Length >= 2 && double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v)) dlIQM = v;
+                                }
+                            }
+                        }
+                        if (line.StartsWith("UPLOAD LATENCY", StringComparison.OrdinalIgnoreCase))
+                        {
+                            for (int j = i + 1; j < Math.Min(i + 6, lines.Length); j++)
+                            {
+                                var t = lines[j].Trim();
+                                if (t.StartsWith("IQM", StringComparison.OrdinalIgnoreCase) || t.StartsWith("IQM :", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    var parts = t.Split(':');
+                                    if (parts.Length >= 2 && double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v)) ulIQM = v;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            var internetIssues = new List<string>();
+            if (speed.Download < DOWNLOAD_THRESHOLD) internetIssues.Add($"Download speed below threshold: {speed.Download} Mbps (< {DOWNLOAD_THRESHOLD} Mbps)");
+            if (speed.Upload < UPLOAD_THRESHOLD) internetIssues.Add($"Upload speed below threshold: {speed.Upload} Mbps (< {UPLOAD_THRESHOLD} Mbps)");
+            if (speed.Ping > PING_THRESHOLD) internetIssues.Add($"Ping is high: {speed.Ping} ms (> {PING_THRESHOLD} ms)");
+            if (dlIQM.HasValue && dlIQM.Value >= DL_LATENCY_THRESHOLD) internetIssues.Add($"Download latency high (IQM): {dlIQM.Value} ms (>= {DL_LATENCY_THRESHOLD} ms)");
+            if (ulIQM.HasValue && ulIQM.Value >= UL_LATENCY_THRESHOLD) internetIssues.Add($"Upload latency high (IQM): {ulIQM.Value} ms (>= {UL_LATENCY_THRESHOLD} ms)");
+
+            if (internetIssues.Count == 0)
+            {
+                sb.AppendLine("✓ Internet connection appears healthy.");
+            }
+            else
+            {
+                sb.AppendLine("! Internet issues detected:");
+                foreach (var it in internetIssues) sb.AppendLine("  - " + it);
+            }
+
+            // ISSUES SUMMARY: concise status for easy scanning
+            try
+            {
+                sb.AppendLine();
+                sb.AppendLine("ISSUES SUMMARY");
+                sb.AppendLine(new string('=', 14));
+
+                // CPU
+                var cpuStatus = sys.CPUUsage >= CPU_THRESHOLD ? "WARNING" : "OK";
+                sb.AppendLine($"CPU: {cpuStatus} ({Math.Round(sys.CPUUsage, 2)}%)");
+
+                // RAM
+                var ramStatus = sys.RAMUsage >= RAM_THRESHOLD ? "WARNING" : "OK";
+                sb.AppendLine($"RAM: {ramStatus} ({Math.Round(sys.RAMUsage, 2)}%)");
+
+                // Uptime
+                var upDays = Math.Round(sys.Uptime.TotalDays, 2);
+                var upStatus = sys.Uptime.TotalDays >= UPTIME_DAYS_THRESHOLD ? "WARNING" : "OK";
+                sb.AppendLine($"Uptime: {upStatus} ({upDays} days)");
+                if (upStatus == "WARNING") sb.AppendLine("  Suggestion: consider rebooting the system to reduce uptime and apply updates.");
+
+                // Disk - compute worst (lowest) free percent across local fixed drives
+                double worstFreePct = 100.0;
+                string worstDrive = "N/A";
+                try
+                {
+                    using var diskSearcher = new ManagementObjectSearcher("SELECT * FROM Win32_LogicalDisk WHERE DriveType=3");
+                    foreach (ManagementObject dobj in diskSearcher.Get())
+                    {
+                        var drive = dobj["DeviceID"]?.ToString() ?? "?";
+                        var sizeObj = dobj["Size"];
+                        var freeObj = dobj["FreeSpace"];
+                        if (sizeObj != null && freeObj != null)
+                        {
+                            var total = Convert.ToDouble(sizeObj);
+                            var free = Convert.ToDouble(freeObj);
+                            var freePct = total > 0 ? Math.Round((free / total) * 100.0, 2) : 0.0;
+                            if (freePct < worstFreePct)
+                            {
+                                worstFreePct = freePct;
+                                worstDrive = drive;
+                            }
+                        }
+                    }
+                }
+                catch { }
+                var diskStatus = worstFreePct < DISK_FREE_THRESHOLD ? "WARNING" : "OK";
+                sb.AppendLine($"Disk: {diskStatus} ({worstDrive} {Math.Round(worstFreePct, 2)}% free)");
+
+                // Download / Upload
+                if (speed != null)
+                {
+                    var dlStatus = speed.Download < DOWNLOAD_THRESHOLD ? "WARNING" : "OK";
+                    var ulStatus = speed.Upload < UPLOAD_THRESHOLD ? "WARNING" : "OK";
+                    sb.AppendLine($"Download: {dlStatus} ({Math.Round(speed.Download, 2)} Mbps)");
+                    sb.AppendLine($"Upload: {ulStatus} ({Math.Round(speed.Upload, 2)} Mbps)");
+
+                    // Ping
+                    var pingStatus = speed.Ping > PING_THRESHOLD ? "WARNING" : "OK";
+                    sb.AppendLine($"Ping: {pingStatus} ({Math.Round(speed.Ping, 2)} ms)");
+
+                    // IQM latencies (if available)
+                    if (dlIQM.HasValue)
+                    {
+                        var dlLatStatus = dlIQM.Value >= DL_LATENCY_THRESHOLD ? "WARNING" : "OK";
+                        sb.AppendLine($"Download IQM latency: {dlLatStatus} ({Math.Round(dlIQM.Value, 3)} ms)");
+                    }
+                    else sb.AppendLine("Download IQM latency: N/A");
+
+                    if (ulIQM.HasValue)
+                    {
+                        var ulLatStatus = ulIQM.Value >= UL_LATENCY_THRESHOLD ? "WARNING" : "OK";
+                        sb.AppendLine($"Upload IQM latency: {ulLatStatus} ({Math.Round(ulIQM.Value, 3)} ms)");
+                    }
+                    else sb.AppendLine("Upload IQM latency: N/A");
+                }
+                else
+                {
+                    sb.AppendLine("Download: N/A");
+                    sb.AppendLine("Upload: N/A");
+                    sb.AppendLine("Ping: N/A");
+                    sb.AppendLine("Download IQM latency: N/A");
+                    sb.AppendLine("Upload IQM latency: N/A");
+                }
+
+                sb.AppendLine();
+            }
+            catch { }
 
             // Try to include more detailed info from the human-readable speedtest results file if present
             try
@@ -936,19 +1226,72 @@ static string SanitizeFileName(string name)
                 {
                     sb.AppendLine();
                     sb.AppendLine("SPEEDTEST DETAILS");
-                    sb.AppendLine("-----------------");
+                    sb.AppendLine(new string('=', 16));
                     var lines = File.ReadAllLines(speedTxt);
-                    // Include key lines: Server Name/Host/Server IP/Server ID, Interface, MAC, Is VPN, Result URL/ID
+                    var writtenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var l in lines)
                     {
-                        if (l.StartsWith("Name:") || l.StartsWith("Host:") || l.StartsWith("Server IP:") || l.StartsWith("Server Port:") || l.StartsWith("Server ID:") || l.StartsWith("Interface:") || l.StartsWith("MAC Address:") || l.StartsWith("Is VPN:") || l.StartsWith("Internal IP:") || l.StartsWith("External IP:") || l.StartsWith("Result URL:") )
+                        var trimmed = l.Trim();
+                        // Stop if the speedtest file continues into server connectivity or other large sections
+                        if (trimmed.StartsWith("SERVER CONNECTIVITY CHECK", StringComparison.OrdinalIgnoreCase)) break;
+
+                        // Skip decorative separators and the big header block
+                        if (trimmed.StartsWith("*****") || trimmed.StartsWith("* SPEEDTEST RESULTS *") || trimmed.StartsWith("TEST TIME:", StringComparison.OrdinalIgnoreCase) == false && trimmed.StartsWith("* "))
                         {
-                            sb.AppendLine(l.Trim());
+                            // allow TEST TIME line, but skip other decorative lines starting with '*'
+                            if (trimmed.StartsWith("TEST TIME:", StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (!writtenKeys.Contains("TestTime")) { sb.AppendLine(trimmed); writtenKeys.Add("TestTime"); }
+                            }
+                            continue;
                         }
-                        // Also include latency blocks (IQM/Low/High/Jitter) and latency headers once
-                        if (l.StartsWith("DOWNLOAD LATENCY") || l.StartsWith("UPLOAD LATENCY") || l.TrimStart().StartsWith("IQM :") || l.TrimStart().StartsWith("Low :") || l.TrimStart().StartsWith("High:") || l.TrimStart().StartsWith("Jitter:"))
+
+                        // Skip sensitive/unwanted fields completely
+                        if (trimmed.StartsWith("Host:", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("Server IP:", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("Server Port:", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("Server ID:", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("MAC Address:", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("Is VPN:", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("Internal IP:", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("External IP:", StringComparison.OrdinalIgnoreCase)
+                            )
                         {
-                            sb.AppendLine(l.Trim());
+                            continue; // omit these
+                        }
+
+                        // Do NOT include the raw speed metrics here (they are already in INTERNET section)
+                        if (trimmed.StartsWith("Download", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("Upload", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("Ping", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("Jitter", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("Packet Loss", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("SPEED RESULTS", StringComparison.OrdinalIgnoreCase)
+                            )
+                        {
+                            continue;
+                        }
+
+                        // Allow test time, server name/location, ISP, latency blocks and result URL
+                        if (trimmed.StartsWith("Name:", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("Location:", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("ISP:", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("Result URL:", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("DOWNLOAD LATENCY", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("UPLOAD LATENCY", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.TrimStart().StartsWith("Jitter", StringComparison.OrdinalIgnoreCase)
+                            || trimmed.StartsWith("TEST TIME:", StringComparison.OrdinalIgnoreCase)
+                            )
+                        {
+                            // dedupe repeated latency lines
+                            var key = trimmed.Split(':')[0].Trim();
+                            if (writtenKeys.Contains(key)) continue;
+                            writtenKeys.Add(key);
+                            sb.AppendLine(trimmed);
+                        }
+                        else
+                        {
+                            // ignore any other lines to avoid repeating data
                         }
                     }
                 }
@@ -958,8 +1301,8 @@ static string SanitizeFileName(string name)
         sb.AppendLine();
 
         // SERVER CONNECTIVITY
-        sb.AppendLine("SERVER CONNECTIVITY CHECK");
-        sb.AppendLine("-----------------------");
+    sb.AppendLine("SERVER CONNECTIVITY CHECK");
+    sb.AppendLine(new string('=', 25));
 
         if (tcpResults == null || tcpResults.Count == 0)
         {
